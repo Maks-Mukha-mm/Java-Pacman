@@ -1,0 +1,1 @@
+Java‑based Pac‑Man clone featuring player movement, ghost enemies, collectible pellets, scoring system, and simple game loop using Swing/AWT.![img.png](img.png)
