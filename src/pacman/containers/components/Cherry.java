@@ -1,6 +1,7 @@
 package pacman.containers.components;
 
 public class Cherry extends Boosters {
+    private static final long FRIGHTENED_DURATION_MS = 7000;
     private int timeIncrease;
 
     public Cherry(int x, int y, int blockSize, String imagePath, int timeIncrease) {
@@ -12,6 +13,7 @@ public class Cherry extends Boosters {
     public void collect(Hero player, Maze maze) {
         maze.getScoreTable().setRemainingTime(maze.getScoreTable().getRemainingTime() + timeIncrease);
         maze.getScoreTable().getTimerLabel().setText("Time: " + maze.getScoreTable().getRemainingTime());
+        maze.frightenGhosts(FRIGHTENED_DURATION_MS);
     }
 
 }

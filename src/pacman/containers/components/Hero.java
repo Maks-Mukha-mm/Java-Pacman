@@ -12,6 +12,7 @@ public class Hero {
     private int currentImageIndex;
     private ImageIcon currentImage;
       private JLabel pacmanLabel;
+    private volatile Direction direction = Direction.RIGHT;
 
     public Hero(int blockSize, int[][] maze) {
 
@@ -56,6 +57,7 @@ public class Hero {
 
 
     public void toggleMouth(Direction direction) {
+        this.direction = direction;
         switch (direction) {
             case RIGHT:
                 currentImageIndex = (currentImageIndex + 1) % pacmanRightImages.length;
@@ -95,7 +97,19 @@ public class Hero {
         return y;
     }
 
+    public Direction getDirection() {
+        return direction;
+    }
+
     public enum Direction {
-        LEFT, RIGHT, UP, DOWN
+        LEFT(0, -1), RIGHT(0, 1), UP(-1, 0), DOWN(1, 0);
+
+        public final int dRow;
+        public final int dCol;
+
+        Direction(int dRow, int dCol) {
+            this.dRow = dRow;
+            this.dCol = dCol;
+        }
     }
 }

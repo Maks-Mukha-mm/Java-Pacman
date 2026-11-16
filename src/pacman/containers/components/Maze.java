@@ -1,9 +1,15 @@
 package pacman.containers.components;
 
+import pacman.ai.GhostMode;
+import pacman.ai.GhostPersonality;
+import pacman.ai.ModeController;
+import pacman.ai.Tile;
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 
 public class Maze extends JPanel {
@@ -26,6 +32,9 @@ public class Maze extends JPanel {
     private JFrame mainPane;
     private Random random = new Random();
     private Thread boosterThread;
+    private final ModeController modeController = new ModeController();
+    private volatile boolean debugMode = false;
+    private int ghostsEatenInRow = 0;
 
 
 
@@ -65,13 +74,22 @@ public class Maze extends JPanel {
         };
 
 
-        Ghosts redGhost = new Ghosts(9 * blockSize, 10 * blockSize, blockSize, maze, redGhostImages, ghosts);
-        Ghosts blueGhost = new Ghosts(10 * blockSize, 10 * blockSize, blockSize, maze, pinkGhostImages, ghosts);
-        Ghosts yellowGhost = new Ghosts(12 * blockSize, 11 * blockSize, blockSize, maze, yellowGhostImages, ghosts);
+        // Inky reuses the red sprite, repainted cyan.
+        ImageIcon[] cyanGhostImages = new ImageIcon[redGhostImages.length];
+        for (int i = 0; i < redGhostImages.length; i++) {
+            cyanGhostImages[i] = Ghosts.recolor(new ImageIcon(redGhostImages[i]), 0.52f, 0.85f);
+        }
 
-        ghosts.add(redGhost);
-        ghosts.add(blueGhost);
-        ghosts.add(yellowGhost);
+        // Blinky must stay first: Inky uses its position for flanking.
+        Ghosts blinky = new Ghosts(9 * blockSize, 10 * blockSize, blockSize, maze, redGhostImages, ghosts, GhostPersonality.BLINKY);
+        Ghosts clyde = new Ghosts(10 * blockSize, 10 * blockSize, blockSize, maze, pinkGhostImages, ghosts, GhostPersonality.CLYDE);
+        Ghosts pinky = new Ghosts(12 * blockSize, 11 * blockSize, blockSize, maze, yellowGhostImages, ghosts, GhostPersonality.PINKY);
+        Ghosts inky = new Ghosts(11 * blockSize, 11 * blockSize, blockSize, maze, cyanGhostImages, ghosts, GhostPersonality.INKY);
+
+        ghosts.add(blinky);
+        ghosts.add(clyde);
+        ghosts.add(pinky);
+        ghosts.add(inky);
         player = new Hero(blockSize, maze);
         add(player.getPacmanLabel());
         setFocusable(true);
@@ -213,11 +231,28 @@ public class Maze extends JPanel {
             try {
                 while (!Thread.currentThread().isInterrupted()) {
                     if (!isPaused) {
+                        modeController.tick(ghostsleeptime);
+                        GhostMode mode = modeController.currentMode();
+                        boolean ending = modeController.isFrightenedEnding();
+                        Ghosts blinky = ghosts.get(0);
+
                         for (Ghosts ghost : ghosts) {
-                            ghost.moveTowards(player);
-                            if (ghost.checkCollision(player)) {
-                                handlePlayerDeath();
+                            // A ghost eaten during this frightened period stays normal until it ends.
+                            if (mode != GhostMode.FRIGHTENED) {
+                                ghost.setFrightened(false, false);
+                            } else if (ghost.isFrightened()) {
+                                ghost.setFrightened(true, ending);
                             }
+                            GhostMode ghostMode = ghost.isFrightened() ? GhostMode.FRIGHTENED
+                                    : (mode == GhostMode.FRIGHTENED ? GhostMode.CHASE : mode);
+
+                            ghost.update(player, ghostMode, blinky);
+                            if (ghost.checkCollision(player)) {
+                                handleGhostCollision(ghost);
+                            }
+                        }
+                        if (debugMode) {
+                            repaint();
                         }
                         Thread.sleep(ghostsleeptime);
                     }
@@ -228,6 +263,33 @@ public class Maze extends JPanel {
         };
         ghostThread = new Thread(ghostTask);
         ghostThread.start();
+    }
+
+    private void handleGhostCollision(Ghosts ghost) {
+        if (ghost.isFrightened()) {
+            // 200, 400, 800, 1600 points for each ghost eaten in a row
+            counter += 200 << Math.min(ghostsEatenInRow, 3);
+            ghostsEatenInRow++;
+            scoreTable.updateCounter(counter);
+            ghost.respawn();
+        } else {
+            handlePlayerDeath();
+        }
+    }
+
+    /** Turns all ghosts blue: they run away and can be eaten. */
+    public void frightenGhosts(long durationMs) {
+        modeController.frighten(durationMs);
+        ghostsEatenInRow = 0;
+        for (Ghosts ghost : ghosts) {
+            ghost.setFrightened(true, false);
+        }
+    }
+
+    /** Shows or hides each ghost's planned route and target tile. */
+    public void toggleDebug() {
+        debugMode = !debugMode;
+        repaint();
     }
 
     public void setGhostsleeptime(int ghostsleeptime) {
@@ -376,6 +438,51 @@ public class Maze extends JPanel {
         for (Boosters booster : boosters) {
             booster.draw(g);
         }
+
+        if (debugMode) {
+            drawDebugOverlay((Graphics2D) g.create());
+        }
+    }
+
+    private void drawDebugOverlay(Graphics2D g) {
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        int half = blockSize / 2;
+
+        for (Ghosts ghost : ghosts) {
+            Color color = ghost.isFrightened() ? new Color(80, 110, 255) : ghost.getPersonality().getColor();
+            List<Tile> path = ghost.getCurrentPath();
+
+            g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), 200));
+            g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            int prevX = ghost.getX() + half;
+            int prevY = ghost.getY() + half;
+            for (Tile step : path) {
+                int cx = step.col() * blockSize + half;
+                int cy = step.row() * blockSize + half;
+                g.drawLine(prevX, prevY, cx, cy);
+                prevX = cx;
+                prevY = cy;
+            }
+
+            Tile target = ghost.getCurrentTarget();
+            if (target != null) {
+                int tx = target.col() * blockSize;
+                int ty = target.row() * blockSize;
+                g.setStroke(new BasicStroke(2f));
+                g.drawRect(tx + 3, ty + 3, blockSize - 6, blockSize - 6);
+                g.drawLine(tx + 7, ty + 7, tx + blockSize - 7, ty + blockSize - 7);
+                g.drawLine(tx + blockSize - 7, ty + 7, tx + 7, ty + blockSize - 7);
+            }
+        }
+
+        String label = "AI: " + modeController.currentMode();
+        g.setFont(getFont().deriveFont(Font.BOLD, 13f));
+        int w = g.getFontMetrics().stringWidth(label);
+        g.setColor(new Color(0, 0, 0, 170));
+        g.fillRoundRect(6, 6, w + 14, 22, 8, 8);
+        g.setColor(Color.WHITE);
+        g.drawString(label, 13, 22);
+        g.dispose();
     }
 
     public void pauseGame() {

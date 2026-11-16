@@ -123,6 +123,8 @@ public class MyButton {
                 } else if (key == KeyEvent.VK_DOWN) {
                     maze.movePlayer(0, 30,Hero.Direction.DOWN);
 
+                } else if (key == KeyEvent.VK_D) {
+                    maze.toggleDebug();
                 }
             }
         });
